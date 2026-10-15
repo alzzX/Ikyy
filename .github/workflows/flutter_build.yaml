@@ -1,0 +1,61 @@
+name: Flutter Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      zip_url:
+        description: "URL zip project Flutter"
+        required: true
+      tag:
+        description: "Tag release (dari bot)"
+        required: false
+      build_type:
+        description: "apk atau aab"
+        required: false
+        default: "apk"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Download project
+        env:
+          ZIP_URL: ${{ inputs.zip_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -fL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/octet-stream" "$ZIP_URL" -o project.zip \
+            || curl -fL "$ZIP_URL" -o project.zip
+          mkdir src && unzip -q project.zip -d src
+
+      - name: Build
+        env:
+          BUILD_TYPE: ${{ inputs.build_type }}
+        run: |
+          PUBSPEC=$(find src -name pubspec.yaml -not -path "*/.*" | head -n 1)
+          cd "$(dirname "$PUBSPEC")"
+          flutter pub get
+          if [ "$BUILD_TYPE" = "aab" ]; then
+            flutter build appbundle --release
+          else
+            flutter build apk --release
+          fi
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          cp build/app/outputs/flutter-apk/*.apk "$GITHUB_WORKSPACE/out/" 2>/dev/null || true
+          cp build/app/outputs/bundle/release/*.aab "$GITHUB_WORKSPACE/out/" 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-release
+          path: out/*
+          retention-days: 3
