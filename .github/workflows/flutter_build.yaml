@@ -1,0 +1,59 @@
+name: Flutter Build
+run-name: Flutter Build ${{ inputs.job_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: "ID job dari bot (otomatis)"
+        required: true
+      app_name:
+        description: "Nama file APK"
+        required: false
+        default: "app"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: uploads
+
+      - name: Extract project
+        env:
+          JOB_ID: ${{ inputs.job_id }}
+        run: |
+          mkdir -p project
+          unzip -q "uploads/${JOB_ID}.zip" -d project
+          PUB=$(find project -name pubspec.yaml -not -path '*/.*' -not -path '*/build/*' -not -path '*/__MACOSX/*' | awk '{print length, $0}' | sort -n | head -1 | cut -d' ' -f2-)
+          if [ -z "$PUB" ]; then echo "pubspec.yaml tidak ditemukan"; exit 1; fi
+          echo "PROJECT_DIR=$(dirname "$PUB")" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Build APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        env:
+          APP_NAME: ${{ inputs.app_name }}
+        run: |
+          if [ ! -d android ]; then flutter create --platforms=android .; fi
+          flutter pub get
+          flutter build apk --release
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          cp build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/out/${APP_NAME:-app}.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk-${{ inputs.job_id }}
+          path: out/*
+          retention-days: 3
